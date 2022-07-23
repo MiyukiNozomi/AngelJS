@@ -13,3 +13,4 @@ angel-test-*
 *.o
 *.obj
 *.lst
+*.pdb
