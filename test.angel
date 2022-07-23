@@ -1,2 +1,2 @@
-let test : string = null;
-print(test);
+let a : string = "aaa";
+a = 0;
