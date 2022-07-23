@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/angel
+angel.so
+angel.dylib
+angel.dll
+angel.a
+angel.lib
+angel-test-*
+*.exe
+*.o
+*.obj
+*.lst
