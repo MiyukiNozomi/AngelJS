@@ -10,8 +10,28 @@ import angel.compiler.parser;
 import angel.compiler.compiler;
 
 void main()
-{
+{	
+	ModuleCompiler cc = new ModuleCompiler("test");
+	AngelModule am = cc.CompileModule("test.angel");
 
+	AngelVM avm = new AngelVM();
+	avm.AddModule(am.moduleName, am);
+	
+	avm.Invoke("test","main");
+	avm.Invoke("test","main2");
+	avm.Invoke("test","main3");
+/*
+	foreach (string s ; am.functions.byKey()) {
+		AngelFunction f = am.functions[s];
+		writeln(f.accessLevel, " #function '",f.name,"' : ", f.returnType, " | Otype#", f.returnObjType);
+		for(int j = 0; j < f.parameters.length; j++) {
+			Parameter p = f.parameters[j];
+			writeln("   Param #",j, "> ", p.name ~ " : ", p.paramType, " | Otype#", p.objectType);
+		}
+		writeln("bytecode----");
+		Dissasemble(f.source);
+	}*/
+/*
 	Compiler compiler = new Compiler(readText("test.angel"));
 	ByteChunk bc = compiler.Compile();
 
@@ -28,7 +48,7 @@ void main()
 
 	debug {
 		writeln( vm.AssertSuccessCount, " Asserts ended up without errors!.");
-	}
+	}*/
 }
 /*
 void main() {

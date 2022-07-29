@@ -36,10 +36,43 @@ public class Local {
     }
 }
 
+public class ModuleCompiler {
+
+    public AngelModule currentModule;
+
+    public this(string moduleName) {
+        currentModule = new AngelModule(moduleName);
+    }
+
+    public AngelModule CompileModule(string filename) {
+        import std.file : readText;
+        Parser p = new Parser(readText(filename));
+        if (p.hadErrors) {
+            writeln("Module Compilation failed: parser errors were detected.");
+            return currentModule;
+        }
+
+        SyntaxTree things = p.Parse();
+
+        debug {
+            things.Print();
+        }
+        for (int i = 0; i < things.tree.length; i++) {
+            Node t = things.tree[i];
+            Compiler cc = new Compiler(filename, t);
+            AngelFunction e = cc.Compile();
+            currentModule.functions[e.name] = e;
+        }
+
+        return currentModule;
+    }
+
+}
+
 public class Compiler {
 
     private ByteChunk finalBytecode;
-    private SyntaxTree tree;
+    private Node tree;
     public bool hadErrors = false;
 
     public Local[string] locals;
@@ -50,37 +83,76 @@ public class Compiler {
     // current scope depth
     public int currentDepth = -1;
 
-    public this(string file) {
-        Parser p = new Parser(file);
-        this.tree = p.Parse();
+    public AngelFunction currentFunction;
 
-        debug {
-            tree.Print();
-        }
+    public string file;
+    public bool wroteReturn = false;
 
-        if (p.hadErrors) {
-            writeln("Compilation failed: parser errors were detected.");
-            hadErrors = true;
-        }
+    public this(string file, Node tree) {
+        this.file = file;
+        this.tree = tree;
     }
 
-    public ByteChunk Compile() {
-        if (hadErrors)
-            return finalBytecode;
+    public AngelFunction Compile() {
+        FunctionNode fn = cast(FunctionNode) this.tree;
 
-        foreach (Node t ; tree.tree) {
-            TranslateNode(t);
+        currentFunction = new AngelFunction();
+        currentFunction.name = fn.name.text;
+
+        ObjectType tt;
+        if (IsObject(fn.returnType, tt)) {
+            currentFunction.returnType = ValueType.Object;
+            currentFunction.returnObjType = tt;
+        } else {
+            currentFunction.returnType = TypeToVType(fn.returnType);
         }
 
-        finalBytecode.Write(OpSet.Return, this.tree.eof.line);
+        currentFunction.accessLevel = fn.levelModifier.text == "public" ? AccessLevel.Public : AccessLevel.Private;
+
+        StartScope();
+        foreach (FunctionParameter e ; fn.parameters) {
+            string name = e.name.text;
+            ObjectType otype;
+            ValueType vtype;
+
+            if (IsObject(e.type, otype)) {
+                vtype = ValueType.Object;
+            } else {
+                vtype = TypeToVType(e.type);
+            }
+
+            Parameter p = new Parameter();
+            p.name = name;
+            p.paramType = vtype;
+            p.objectType = otype;
+
+            Local ll = new Local(p.name, p.paramType);
+            AddLocal(ll);
+
+            currentFunction.parameters ~= p;
+        }
+        TranslateNode(fn.block, false);
+
+        bool wroteR = wroteReturn;
+        EndScope(fn.block.end.line);
+
+        if (!wroteR && currentFunction.returnType == ValueType.Void) {
+            finalBytecode.Write(OpSet.Return, fn.block.end.line);
+        } else if (!wroteR) {
+            CompileError(fn.block.end.line, "This function should return a value of type '%s'.", fn.returnType.text);
+        }
+        
+        currentFunction.source = finalBytecode;
+
+        //finalBytecode.Write(OpSet.Return, this.tree.eof.line);
 
         if (hadErrors) {
-            writeln("Compilation finished with compiler errors, the program may not work as intended.");
+            writeln("Function '" ~ currentFunction.name ~"' Compilation finished with compiler errors, the program may not work as intended.");
         } else {
             writeln("Compilation Succeded!");
         }
 
-        return finalBytecode;
+        return currentFunction;
     }
 
     public bool IsObject(Token t, out ObjectType type) {
@@ -107,6 +179,9 @@ public class Compiler {
             case "boolean":
             case "bool": return ValueType.Boolean;
 
+            case "void":
+                return ValueType.Void;
+
             default:
                 CompileError(t.line, "Unrecognized type '%s'. are you missing a module?", t.text);
                 return ValueType.Integer;
@@ -118,6 +193,7 @@ public class Compiler {
     }
 
     public void EndScope(int lastLine) {
+        wroteReturn = false;
         this.currentDepth -= 1;
 
         for (int i = cast(int) allocObjects.length - 1; i > 0;i--) {
@@ -147,17 +223,29 @@ public class Compiler {
         locals[lc.name] = lc;
     }
 
-    public void TranslateNode(Node t) {
+    public void TranslateNode(Node t, bool canOpenScope = true) {
         switch(t.type) {
+            case NodeType.FunctionCall: {
+                break; // TODO: implement me!
+            }
+            case NodeType.Return: {
+                ReturnNode nd = cast(ReturnNode) t;
+                TranslateNode(nd.returnThingy);
+                finalBytecode.Write(OpSet.Return, nd.ln.line);
+                wroteReturn = true;
+                break;
+            }
             case NodeType.Block: {
                 BlockNode bn = cast(BlockNode) t;
-                StartScope();
+                if (canOpenScope)
+                    StartScope();
           
                 foreach (Node n ; bn.code) {
                     TranslateNode(n);
                 }
             
-                EndScope(bn.end.line);
+                if (canOpenScope)
+                    EndScope(bn.end.line);
                 break;
             }
             debug {
@@ -356,7 +444,7 @@ public class Compiler {
                     case TokenType.Greater:    finalBytecode.Write(OpSet.Greater, bn.operator.line); break;
                     case TokenType.Or:         finalBytecode.Write(OpSet.Or, bn.operator.line); break;
                     case TokenType.And:        finalBytecode.Write(OpSet.And, bn.operator.line); break;
-                    case TokenType.LessEqual: {
+                    case TokenType.LessEqual: { 
                         finalBytecode.Write(OpSet.Greater, bn.operator.line);
                         finalBytecode.Write(OpSet.Not, bn.operator.line);
                         break;
@@ -408,7 +496,7 @@ public class Compiler {
         }
 
         void CompileError(Char, Args...)(int line, in Char[] fmt, Args args) {
-            writeln("Error at line ", line, " > ", format(fmt, args));
+            writeln("Error in file '",file, "' at line ", line, " > ", format(fmt, args));
             hadErrors = true;
         }
 }

@@ -6,7 +6,8 @@ import angel.compiler.lexer;
 
 public enum NodeType {
     Literal, BinaryOP, Unary, Let, Access, LetAssign,
-    If, While, For, Block,
+    If, While, For, Block , Function, FunctionCall,
+    Return,
 
     /** only avaliable in debug mode, check lexer.d in line 8 - 14*/
     Assert, Print
@@ -17,6 +18,120 @@ public abstract class Node {
     public this(NodeType t) {this.type = t;}
     debug {
         public abstract void PrintNode(string indent);
+    }
+}
+
+public class SyntaxTree {
+    public Node[] tree;
+    public Token eof;
+
+    public void Print() {
+        for (int i = 0; i < tree.length; i++) {
+            tree[i].PrintNode("");
+        }
+    }
+}
+
+debug {
+    public class AssertNode : Node {
+
+        public Node expr;
+
+        // the only reason i capture the last token of this assert is just so that i can
+        // throw an error specifically in the line of the assert.
+        public Token current;
+
+        public this(Node expr, Token current) {
+            super(NodeType.Assert);
+            this.current = current;
+            this.expr = expr;
+        }
+
+        public override void PrintNode(string indent) {
+            writeln(indent, "Assert");
+            expr.PrintNode(indent ~ "   ");
+        }
+    }
+    public class PrintNode : Node {
+
+        public Node expr;
+        public Token current;
+
+        public this(Node expr, Token current) {
+            super(NodeType.Print);
+            this.current = current;
+            this.expr = expr;
+        }
+
+        public override void PrintNode(string indent) {
+            writeln(indent, "Print");
+            expr.PrintNode(indent ~ "   ");
+        }
+    }
+}
+
+
+public class ReturnNode : Node {
+    public Token ln;
+    public Node returnThingy;
+
+    public this() {
+        super(NodeType.Return);
+    }
+
+    debug {
+        public override void PrintNode(string indent) {
+            writeln(indent, "Return");
+            returnThingy.PrintNode(indent ~ "   ");
+        }
+    }
+}
+
+public class FunctionCallNode : Node {
+    public Token funcName;
+    public Node[] parameters;
+
+    public this() {
+        super(NodeType.FunctionCall);
+    }
+
+    debug {
+        public override void PrintNode(string indent) {
+            writeln(indent, "FunctionCall '", funcName.text, "'");
+            writeln(indent, "   Parameters: ");
+            for (int i = 0; i < parameters.length; i++) {
+                parameters[i].PrintNode(indent ~"      ");
+            }
+        }
+    }
+}
+
+public struct FunctionParameter {
+    Token type;
+    Token name;
+}
+
+public class FunctionNode : Node{
+    public Token levelModifier;
+    public Token name, returnType;
+    public FunctionParameter[] parameters;
+    public BlockNode block;
+
+    public this() {
+        super(NodeType.Function);
+    }
+
+    debug {
+        public override void PrintNode(string indent) {
+            writeln("Function '", name.text, "' : ", returnType.text);
+            write(" Parameters: ");
+            for (int i = 0; i < parameters.length; i++) {
+                FunctionParameter p = parameters[i];
+                write(p.name.text, " : ", p.type.text);
+            }
+            writeln();
+            block.PrintNode("   " ~ indent);
+        }
     }
 }
 
@@ -68,55 +183,6 @@ public class ForNode : Node {
                 write(indent, "   Increment:\n");
                 increment.PrintNode(indent ~ "      ");
             }
-        }
-    }
-}
-
-public class SyntaxTree {
-    public Node[] tree;
-    public Token eof;
-
-    public void Print() {
-        for (int i = 0; i < tree.length; i++) {
-            tree[i].PrintNode("");
-        }
-    }
-}
-
-debug {
-    public class AssertNode : Node {
-
-        public Node expr;
-
-        // the only reason i capture the last token of this assert is just so that i can
-        // throw an error specifically in the line of the assert.
-        public Token current;
-
-        public this(Node expr, Token current) {
-            super(NodeType.Assert);
-            this.current = current;
-            this.expr = expr;
-        }
-
-        public override void PrintNode(string indent) {
-            writeln(indent, "Assert");
-            expr.PrintNode(indent ~ "   ");
-        }
-    }
-    public class PrintNode : Node {
-
-        public Node expr;
-        public Token current;
-
-        public this(Node expr, Token current) {
-            super(NodeType.Print);
-            this.current = current;
-            this.expr = expr;
-        }
-
-        public override void PrintNode(string indent) {
-            writeln(indent, "Print");
-            expr.PrintNode(indent ~ "   ");
         }
     }
 }

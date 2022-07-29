@@ -34,17 +34,20 @@ public class Parameter {
     public ValueType paramType;
     public ObjectType objectType;
     public string name;
+}
 
-    public int inStackID;
+public enum AccessLevel {
+    Public, Private, Protected
 }
 
 public class AngelFunction : AngelObject {
-    public ByteChunk func;
+    public ByteChunk source;
     public string name;
     public Parameter[] parameters;
+    public AccessLevel accessLevel;
 
-    public Value[256] stack;
-    public Value[] allocLets;
+    public ValueType returnType;
+    public ObjectType returnObjType;
 
     public this() {
         super(ObjectType.Function);
@@ -52,6 +55,18 @@ public class AngelFunction : AngelObject {
 
     public override string ToString() {
         return "AngelFunc#" ~name;
+    }
+}
+
+
+public class AngelModule {
+    
+    public string moduleName;
+    public Value[string] globals;
+    public AngelFunction[string] functions;
+
+    public this(string moduleName) {
+        this.moduleName = moduleName;
     }
 }
 

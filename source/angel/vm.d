@@ -14,16 +14,31 @@ public enum VMExitCode {
     Okay
 }
 
+public struct CallFrame {
+    public AngelFunction func;
+    public Value[] allocLets;
+    
+    public uint8_t* ip;
+
+    public void Release() {
+        this.allocLets = null;
+    }
+}
+
 public class AngelVM {
 
-    public uint8_t* ip;
-    public ByteChunk chunk;
+    public CallFrame[1520] frames;
+    public int callIndex = 0;
     public Value[256] stack;
-    public Value[] allocLets;
+
+    public auto currentCallFrame() {return &frames[callIndex];}
+    public auto chunk() {return &frames[callIndex].func.source;}
 
     public AngelObject[] allocatedObjects;
 
     public Value* stackTop;
+
+    public AngelModule[string] modules;
 
     debug {
         public int AssertSuccessCount = 0;
@@ -37,10 +52,25 @@ public class AngelVM {
         stackTop = stack.ptr;
     }
 
-    public VMExitCode Run(ByteChunk cc) {
-        this.chunk = cc;
+    public void AddModule(string m,AngelModule e) {
+        modules[m] = e;
+    }
 
-        this.ip = this.chunk.bytes.ptr;
+    public void Invoke(string moduleName, string method) {
+        Invoke(modules[moduleName].functions[method]);
+    }
+
+    public void Invoke(AngelFunction ef) {
+        debug {
+            writeln("Invoking Function: ", ef.name);
+        }
+        frames[callIndex] = CallFrame(ef);
+        ResetStack();
+        Run();
+    }
+
+    public VMExitCode Run() {
+        this.currentCallFrame.ip = chunk.bytes.ptr;
 
         for (;;) {
             debug {
@@ -56,7 +86,7 @@ public class AngelVM {
                     write("] ");
                 }
                 writeln();
-                DissasembleInstruction(cast(int)(this.ip - this.chunk.bytes.ptr), this.chunk);
+                DissasembleInstruction(cast(int)(this.currentCallFrame.ip - this.chunk.bytes.ptr), *this.chunk);
             }
             uint8_t inst = ReadByte();
             switch(inst) {
@@ -103,12 +133,12 @@ public class AngelVM {
                 }
                 case OpSet.Loop: {
                     uint16_t offset = ReadShort();
-                    this.ip = this.ip - offset;
+                    this.currentCallFrame.ip = this.currentCallFrame.ip - offset;
                     break;
                 }
                 case OpSet.Jump: {
                     uint16_t offset = ReadShort();
-                    this.ip += offset;
+                    this.currentCallFrame.ip += offset;
                     break;
                 }
                 case OpSet.JumpCaseFalse: {
@@ -121,23 +151,23 @@ public class AngelVM {
                     }
 
                     if (!AsBool(a)) {
-                        this.ip += offset;
+                        this.currentCallFrame.ip += offset;
                     }
 
                     break;
                 }
                 case OpSet.DeleteLet: {
                     int delIndex = AsInt(ReadConstant());
-                    allocLets.remove(delIndex);
+                    currentCallFrame.allocLets.remove(delIndex);
                     break;
                 }
                 case OpSet.AllocLet: {
                     ValueType type = cast(ValueType) AsInt(ReadConstant());
-                    allocLets ~= NewValue(type);
+                    currentCallFrame.allocLets ~= NewValue(type);
                     break;
                 }
                 case OpSet.SetLet: {
-                    Value* targetVariable = &allocLets[AsInt(ReadConstant())];
+                    Value* targetVariable = &currentCallFrame.allocLets[AsInt(ReadConstant())];
                     Value v = Pop();
 
                     if (targetVariable.type == ValueType.Object && v.type == ValueType.Object) {
@@ -160,7 +190,7 @@ public class AngelVM {
                     break;
                 }
                 case OpSet.GetLet: {
-                    Push(allocLets[AsInt(ReadConstant())]);
+                    Push(currentCallFrame.allocLets[AsInt(ReadConstant())]);
                     break;
                 }
                 case OpSet.Add: {
@@ -181,7 +211,7 @@ public class AngelVM {
                         }
                         
                         if (!IsNumeric(a) || !IsNumeric(b)) {
-                            RuntimeError(this.chunk.GetLine(cast(int) (this.ip - this.chunk.bytes.ptr) - 2),
+                            RuntimeError(this.chunk.GetLine(cast(int) (this.currentCallFrame.ip - this.chunk.bytes.ptr) - 2),
                                             "One of the operands isn't Numeric.");
                             return VMExitCode.RuntimeError;
                         } 
@@ -232,7 +262,7 @@ public class AngelVM {
                 case OpSet.Not: {
                     Value a = Pop();
                     if (a.type != ValueType.Boolean) {
-                        RuntimeError(cast(int)(this.ip - this.chunk.bytes.ptr) - 1, "Invalid Operator!");
+                        RuntimeError(cast(int)(this.currentCallFrame.ip - this.chunk.bytes.ptr) - 1, "Invalid Operator!");
                         return VMExitCode.RuntimeError;
                     } else {
                         Push(NewBool(!AsBool(a)));
@@ -241,7 +271,7 @@ public class AngelVM {
                 }
                 default:
                     InternalError("unrecognized OpSet '%03d' at offset '%03d'", inst,
-                                            cast(int)(this.ip - this.chunk.bytes.ptr) - 1);
+                                            cast(int)(this.currentCallFrame.ip - this.chunk.bytes.ptr) - 1);
                     return VMExitCode.InternalError;
                 case OpSet.Return: {
                     return VMExitCode.Okay;
@@ -255,16 +285,16 @@ public class AngelVM {
     Value Pop() {this.stackTop--; return *this.stackTop;}
 
     auto ReadShort() {
-        this.ip += 2;
-        return cast(uint16_t)((this.ip[-2] << 8) |  this.ip[-1]);
+        this.currentCallFrame.ip += 2;
+        return cast(uint16_t)((this.currentCallFrame.ip[-2] << 8) |  this.currentCallFrame.ip[-1]);
     }
 
     auto GetCurrentLine() {
-        return chunk.GetLine(cast(int)(this.ip - this.chunk.bytes.ptr) - 1);
+        return chunk.GetLine(cast(int)(this.currentCallFrame.ip - this.chunk.bytes.ptr) - 1);
     }
 
     auto ReadByte() {
-        return *(this.ip++);
+        return *(this.currentCallFrame.ip++);
     }
 
     auto ReadConstant() {
@@ -299,7 +329,7 @@ template ResolveOperator(string operator) {
         Value a = Pop();
         
         if (!IsNumeric(a) || !IsNumeric(b)) {
-            RuntimeError(this.chunk.GetLine(cast(int) (this.ip - this.chunk.bytes.ptr) - 2),
+            RuntimeError(this.chunk.GetLine(cast(int) (this.currentCallFrame.ip - this.chunk.bytes.ptr) - 2),
                             \"One of the operator isn't Numeric.\");
             return VMExitCode.RuntimeError;
         } 
@@ -333,7 +363,7 @@ template ResolveBooleanOperator(string operator) {
         } else if (b.type == ValueType.Integer && a.type == ValueType.Integer) {
             Push(NewBool(AsInt(a) " ~ operator ~ " AsInt(b)));
         } else {
-            RuntimeError(this.chunk.GetLine(cast(int) (this.ip - this.chunk.bytes.ptr) - 2),
+            RuntimeError(this.chunk.GetLine(cast(int) (this.currentCallFrame.ip - this.chunk.bytes.ptr) - 2),
                             \"One of the operator isn't Numeric.\");
             return VMExitCode.RuntimeError;
         }

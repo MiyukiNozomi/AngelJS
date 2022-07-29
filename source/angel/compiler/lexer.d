@@ -13,6 +13,8 @@ public enum TokenType {
     Keyword_Assert,
     Keyword_Print,
 
+    Keyword_Return,
+    Keyword_LevelModifier,    
     Keyword_Let,
     Keyword_True,
     Keyword_False,
@@ -25,6 +27,7 @@ public enum TokenType {
     String,
     Float, Integer,
     
+    Comma,
     Plus, Minus, Divide, Multiply, Not,
 
     Equal, EqualEqual, NotEqual,
@@ -105,7 +108,7 @@ public class Lexer {
         } else if (isAlpha(current) || current == '_') {
             string acc = "";
 
-            while ((isAlpha(current) || current == '_') && current != '\0') {
+            while ((isAlpha(current) || current == '_' || isDigit(current)) && current != '\0') {
                 acc ~= Next();
             }
 
@@ -127,6 +130,7 @@ public class Lexer {
         mixin(SingleOperator!(':', "DoubleDot"));
         mixin(SingleOperator!(';', "Semicolon"));
         mixin(SingleOperator!('.', "Dot"));
+        mixin(SingleOperator!(',', "Comma"));
 
         mixin(SingleOperator!('+', "Plus"));
         mixin(SingleOperator!('-', "Minus"));
@@ -149,11 +153,14 @@ public class Lexer {
     }
 }
 
+
 auto GetTypeForStr(string acc) {
     debug {
         if (acc == "assert") return TokenType.Keyword_Assert;
         if (acc == "print") return TokenType.Keyword_Print;
     }
+    if (acc == "public" || acc == "private") return TokenType.Keyword_LevelModifier;
+    if (acc == "return") return TokenType.Keyword_Return;
     if (acc == "let" || acc == "var") return TokenType.Keyword_Let;
     if (acc == "true") return TokenType.Keyword_True;
     if (acc == "false") return TokenType.Keyword_False;

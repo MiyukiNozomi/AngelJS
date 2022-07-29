@@ -59,7 +59,7 @@ public union valuedata {
 }
 
 public enum ValueType {
-    FloatingPoint, Integer, Boolean, Object,
+    FloatingPoint, Integer, Boolean, Object, Void,
 }
 
 public struct Value {

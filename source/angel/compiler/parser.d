@@ -21,7 +21,7 @@ public class Parser {
         SyntaxTree t = new SyntaxTree();
 
         while (current.type != TokenType.EndOfFile) {
-            Node nd = ParseStatment();
+            Node nd = ParseGlobalsScope();
             
             if (nd is null) continue;
             
@@ -31,6 +31,49 @@ public class Parser {
         t.eof = current;
 
         return t;
+    }
+
+    public Node ParseGlobalsScope() {
+        if (current.type == TokenType.Keyword_LevelModifier) {
+            return ParseMethod();
+        } else {
+            return ParseLet();
+        }
+    }
+
+    public Node ParseMethod() {
+        Token accessTk = Next();
+        Token name = Match([TokenType.Identifier]);
+
+        Match([TokenType.LeftParen]);
+        FunctionParameter[] p;
+
+        if (!Is(TokenType.RightParen)) {
+            do {
+                Token paramType = Match([TokenType.Identifier],"Expected an identifier for a parameter typename.");
+                Token paramName = Match([TokenType.Identifier],"Expected an identifier for a parameter name.");
+                p ~= FunctionParameter(paramType, paramName);
+            } while (BMatch(TokenType.Comma) && 
+                     current.type != TokenType.RightParen &&
+                     current.type != TokenType.EndOfFile); 
+        }
+        Match([TokenType.RightParen], "Expected a ) to close a method parameter block, not " ~ current.text);
+
+        Match([TokenType.DoubleDot], "Missing ':' to inform this method's return type.");
+
+        Token type = Match([TokenType.Identifier], "Expected a method return type.");
+
+        BlockNode block = cast(BlockNode) ParseBlock();
+
+        FunctionNode fn = new FunctionNode();
+        fn.name = name;
+        fn.returnType = type;
+        fn.levelModifier = accessTk;
+        fn.block = block;
+        fn.parameters = p;
+
+        writeln(current.type);
+        return fn;
     }
 
     public Node ParseStatment() {
@@ -45,6 +88,13 @@ public class Parser {
             return ParseWhile();
         } else if (current.type == TokenType.Keyword_For) {
             return ParseFor();
+        } else if (current.type == TokenType.Keyword_Return) {
+            Token crr = Next();
+            Node expr = ParseExpressionSemicolon();
+            ReturnNode rn = new ReturnNode();
+            rn.ln = crr;
+            rn.returnThingy = expr;
+            return rn;   
         } else {
             debug {
                 if (current.type == TokenType.Keyword_Assert) {
@@ -63,14 +113,14 @@ public class Parser {
     }
 
     public Node ParseBlock() {
-        Token start = Match([TokenType.LeftBrace]);
+        Token start = Match([TokenType.LeftBrace], "Expected a '{' to open a block.");
     
         Node[] things;
         while (current.type != TokenType.RightBrace && current.type != TokenType.EndOfFile) {
             things ~= ParseStatment();
         }  
 
-        Token end = Match([TokenType.RightBrace]);
+        Token end = Match([TokenType.RightBrace], "Expected a '}' to close a block.");
         BlockNode nd = new BlockNode(start,end, things);
         return nd;
     }
@@ -203,7 +253,6 @@ public class Parser {
             Node operand = ParseExpression(unaryOperatorPrecedence);
             left = new UnaryNode(operatorType, operand);
         } else {
-            writeln(current.type);
             left = ParsePrimary();
         }
 
@@ -227,11 +276,32 @@ public class Parser {
         return new LetAssignNode(varName, expr);
     }
 
+    public Node ParseMethodCall(Token name) {
+        Match([TokenType.LeftParen]);
+
+        Node[] params;
+
+        if (!Is(TokenType.RightParen)) {
+            do {
+                params ~= ParseExpression();
+            } while(BMatch(TokenType.Comma) && current.type != TokenType.EndOfFile);
+        }
+
+        Match([TokenType.RightParen], "Expected a ) to end a method call.");
+
+        FunctionCallNode nd = new FunctionCallNode();
+        nd.funcName = name;
+        nd.parameters = params;
+        return nd;
+    }
+
     private Node ParsePrimary() {
         if (Is(TokenType.Identifier)) {
             auto varAccess = Next();
             if (current.type == TokenType.Equal) {
                 return ParseAssignment(varAccess);
+            } else if (current.type == TokenType.LeftParen) {
+                return ParseMethodCall(varAccess);
             }
             return new AccessNode(varAccess);
         }
@@ -262,7 +332,15 @@ public class Parser {
         }
     }
 
-    public Token Match(TokenType[] types) {
+    public bool BMatch(TokenType t) {
+        if (current.type == t) {
+            Next();
+            return true;
+        }
+        return false;
+    }
+
+    public Token Match(TokenType[] types,string msg = "") {
         foreach(TokenType t ; types) {
             if (current.type == t) {
                 return Next();
@@ -270,7 +348,11 @@ public class Parser {
         }
         // i'm not using Error() here because i have no idea how to print out an element of an enum
         // as something like "Semicolon" or "Identifier"
-        writeln("Error at line ", current.line,": Expected '",types[0],"' not  ", current.type);
+        if (msg == "")
+            writeln("Error at line ", current.line,": Expected '",types[0],"' not  ", current.type);
+        else
+            writeln("Error at line ", current.line,": ", msg);
+        
         hadErrors = true;
         Next();
         return Token(current.line, current.position, "0", types[0]);
