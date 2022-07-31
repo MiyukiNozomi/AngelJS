@@ -1,15 +1,8 @@
+public sayHi() : float {
+	return 2 + 3;
+}
+
 public main() : void {
-	print("Hello, World!");
-}
-
-public main2() : void {
-	let a : boolean = true;
+	let a : float = sayHi();
 	print(a);
-}
-
-public main3() : void {
-	let a : int = 2;
-	let b : int = 3;
-
-	print(b > a);
 }

@@ -18,8 +18,6 @@ void main()
 	avm.AddModule(am.moduleName, am);
 	
 	avm.Invoke("test","main");
-	avm.Invoke("test","main2");
-	avm.Invoke("test","main3");
 /*
 	foreach (string s ; am.functions.byKey()) {
 		AngelFunction f = am.functions[s];

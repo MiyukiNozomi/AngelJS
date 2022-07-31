@@ -144,6 +144,11 @@ public class Compiler {
         
         currentFunction.source = finalBytecode;
 
+        debug {
+            writeln("func '", currentFunction.name, "' bytecode--");
+            Dissasemble(currentFunction.source);
+        }
+
         //finalBytecode.Write(OpSet.Return, this.tree.eof.line);
 
         if (hadErrors) {
@@ -226,7 +231,11 @@ public class Compiler {
     public void TranslateNode(Node t, bool canOpenScope = true) {
         switch(t.type) {
             case NodeType.FunctionCall: {
-                break; // TODO: implement me!
+                FunctionCallNode nd = cast(FunctionCallNode) t;
+
+                finalBytecode.Write(OpSet.FindMethodAndInvoke, nd.funcName.line);
+                finalBytecode.Write(finalBytecode.WriteObject(new AngelString(nd.funcName.text)), nd.funcName.line);
+                break;
             }
             case NodeType.Return: {
                 ReturnNode nd = cast(ReturnNode) t;

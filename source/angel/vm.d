@@ -16,27 +16,30 @@ public enum VMExitCode {
 
 public struct CallFrame {
     public AngelFunction func;
-    public Value[] allocLets;
-    
     public uint8_t* ip;
 
+    public Value[512] allocLets;
+    public Value[256] stack;
+    public Value* stackTop;
+
+    public int letPointer;
+
     public void Release() {
-        this.allocLets = null;
+        this.stack = new Value[256];
+        this.allocLets = new Value[512];
     }
 }
 
 public class AngelVM {
 
-    public CallFrame[1520] frames;
-    public int callIndex = 0;
-    public Value[256] stack;
+    public CallFrame[5] frames;
+    public int callIndex = -1;
 
-    public auto currentCallFrame() {return &frames[callIndex];}
-    public auto chunk() {return &frames[callIndex].func.source;}
+    public CallFrame* currentCallFrame() {return &frames[callIndex];}
+    public auto chunk() {           return &frames[callIndex].func.source;}
+    public auto stack() {           return &frames[callIndex].stack;}
 
     public AngelObject[] allocatedObjects;
-
-    public Value* stackTop;
 
     public AngelModule[string] modules;
 
@@ -45,37 +48,50 @@ public class AngelVM {
     }
 
     public this() {
-        this.ResetStack();
+
     }
 
     public void ResetStack() {
-        stackTop = stack.ptr;
+        currentCallFrame.stackTop = stack.ptr;
     }
 
     public void AddModule(string m,AngelModule e) {
         modules[m] = e;
     }
 
-    public void Invoke(string moduleName, string method) {
-        Invoke(modules[moduleName].functions[method]);
+    public bool Invoke(string moduleName, string method) {
+        return Invoke(modules[moduleName].functions[method]);
     }
 
-    public void Invoke(AngelFunction ef) {
+    public bool Invoke(AngelFunction ef) {
         debug {
             writeln("Invoking Function: ", ef.name);
         }
+        
+        callIndex = callIndex + 1;
         frames[callIndex] = CallFrame(ef);
+        this.currentCallFrame.ip = chunk.bytes.ptr;
         ResetStack();
-        Run();
+        auto exitCode = Run();
+        if (exitCode != VMExitCode.Okay) {
+            writeln("AngelVM Failed to execute function '", ef.name ,"' properly.");
+            return false;
+        }
+
+        debug {
+            writeln("Leaving Function: ", ef.name);
+        }
+        return true;
     }
 
     public VMExitCode Run() {
-        this.currentCallFrame.ip = chunk.bytes.ptr;
+        if (callIndex < 0)
+            return VMExitCode.RuntimeError;
 
         for (;;) {
             debug {
                 write("stack > ");
-               for (Value* v = this.stack.ptr; v < this.stackTop; v++) {
+               for (Value* v = this.stack.ptr; v < this.currentCallFrame.stackTop; v++) {
                     write("[");
                     if (v.type == ValueType.Object) {
                             if (v.isNull) write("null");
@@ -121,6 +137,30 @@ public class AngelVM {
                         break;
                     }
                 }
+                case OpSet.FindMethodAndInvoke: {
+                    AngelString obj = cast(AngelString) ReadObject();
+                    string targetFunc = obj.characters;
+
+                    bool foundFunction = false;
+                    foreach (string k ; modules.byKey()) {
+                        AngelModule m = modules[k];
+                        foreach (string nm ; m.functions.byKey()) {
+                            if (nm == targetFunc) {
+                                if(!Invoke(k, targetFunc)) {
+                                    return VMExitCode.RuntimeError;
+                                }
+                                foundFunction = true;
+                                break;
+                            }
+                        }
+                        if (foundFunction)
+                            break;
+                    }
+                    if (!foundFunction) {
+                        RuntimeError(GetCurrentLine(), "the method: %s wasn't found on the current context, are you missing a mod?", targetFunc);
+                    }
+                    break;
+                }
                 case OpSet.AllocObject: {
                     AngelObject obj = ReadObject();
                     allocatedObjects ~= obj;
@@ -158,12 +198,12 @@ public class AngelVM {
                 }
                 case OpSet.DeleteLet: {
                     int delIndex = AsInt(ReadConstant());
-                    currentCallFrame.allocLets.remove(delIndex);
+                    currentCallFrame.letPointer = delIndex - 1;
                     break;
                 }
                 case OpSet.AllocLet: {
                     ValueType type = cast(ValueType) AsInt(ReadConstant());
-                    currentCallFrame.allocLets ~= NewValue(type);
+                    currentCallFrame.allocLets[currentCallFrame.letPointer++] = NewValue(type);
                     break;
                 }
                 case OpSet.SetLet: {
@@ -274,15 +314,50 @@ public class AngelVM {
                                             cast(int)(this.currentCallFrame.ip - this.chunk.bytes.ptr) - 1);
                     return VMExitCode.InternalError;
                 case OpSet.Return: {
-                    return VMExitCode.Okay;
+                    if (callIndex >= 0) {
+                        Value returnVal;
+                        bool crashed = false;
+                        if (currentCallFrame().func.returnType != ValueType.Void) {
+                            returnVal = Pop();
+
+                            if (returnVal.type == ValueType.Integer && currentCallFrame.func.returnType == ValueType.FloatingPoint) {
+                                Value e = NewFloat(AsInt(returnVal));
+                                returnVal = e;
+                            } else if (returnVal.type != currentCallFrame.func.returnType) {
+                                write("Error in line ",GetCurrentLine()," > Cannot return a '");
+                                PrintType(returnVal);
+                                write("' in a function that should return an '", currentCallFrame.func.returnType);
+                                writeln("'");
+                                crashed = true;
+                            } else if (returnVal.type == ValueType.Object &&
+                                currentCallFrame.func.returnObjType != allocatedObjects[AsObject(returnVal)].type) {
+                                write("Error in line ",GetCurrentLine()," > Cannot return a '");
+                                PrintType(returnVal);
+                                write("' in a function that should return an '", currentCallFrame.func.returnObjType);
+                                writeln("'");
+                                crashed = true;
+                            }
+                        } else {
+                            returnVal = Value(ValueType.Object);
+                            returnVal.isNull = true;
+                        }
+
+                        frames[callIndex] = CallFrame();
+                        callIndex--;   
+                        if (callIndex > -1)
+                            Push(returnVal);
+
+                        return crashed ? VMExitCode.RuntimeError : VMExitCode.Okay;
+                    } else
+                        return VMExitCode.Okay;
                 }
             }
         }
     }
 
-    Value Peek(int distance) {return this.stackTop[-1 - distance];}
-    void Push(Value v) {*this.stackTop = v; this.stackTop++;}
-    Value Pop() {this.stackTop--; return *this.stackTop;}
+    Value Peek(int distance) {return this.currentCallFrame.stackTop[-1 - distance];}
+    void Push(Value v) {*this.currentCallFrame.stackTop = v; this.currentCallFrame.stackTop++;}
+    Value Pop() {this.currentCallFrame.stackTop--; return *this.currentCallFrame.stackTop;}
 
     auto ReadShort() {
         this.currentCallFrame.ip += 2;

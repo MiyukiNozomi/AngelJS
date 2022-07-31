@@ -134,6 +134,8 @@ enum OpSet {
     GetLet,
     SetLet,
 
+    FindMethodAndInvoke,
+
     Jump,
     Loop,
     JumpCaseFalse,
@@ -239,12 +241,9 @@ debug {
 
         uint8_t inst = bc.bytes[offset];
         switch(inst) {
-            case OpSet.AllocObject: {
-                AngelObject o = bc.objects[bc.bytes[offset + 1]];
-                writef("%-12s \'%s\'\n", "allocObject", o.ToString());
-                return offset + 2;
-            }
-            case OpSet.DeleteObject: return ConstantInstruction("deleteObject", offset, bc);
+            case OpSet.FindMethodAndInvoke: return ObjectInstruction("find&Invoke", offset, bc);
+            case OpSet.AllocObject:         return ObjectInstruction("allocObject", offset, bc);
+            case OpSet.DeleteObject:        return ConstantInstruction("deleteObject", offset, bc);
 
             case OpSet.Constant:  return ConstantInstruction("constant", offset, bc);
             case OpSet.DeleteLet: return ConstantInstruction("deleteLet", offset, bc);
@@ -301,11 +300,8 @@ debug {
     }
 
     int ObjectInstruction(string name, int ind, ByteChunk c) {
-        Value v = c.constants[c.bytes[ind + 1]];
-        writef("%-12s \'", name);
-        ObjectType t = cast(ObjectType) AsInt(v);
-        write(t);
-        writeln("\'");
+        AngelObject o = c.objects[c.bytes[ind + 1]];
+        writef("%-12s \'%s\'\n", name, o.ToString());
         return ind + 2;
     }
 
