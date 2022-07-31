@@ -59,19 +59,56 @@ public class AngelVM {
         modules[m] = e;
     }
 
-    public bool Invoke(string moduleName, string method) {
-        return Invoke(modules[moduleName].functions[method]);
+    public bool Invoke(string moduleName, string method, int argCount) {
+        AngelModule em = modules[moduleName];
+        
+        return Invoke(em.functions[method], argCount);
     }
 
-    public bool Invoke(AngelFunction ef) {
+    public bool Invoke(AngelFunction ef, int argCount) {
         debug {
             writeln("Invoking Function: ", ef.name);
         }
+
+        int ln = 0;
+        if (callIndex != -1)
+            ln = GetCurrentLine();
+
+        if (ef.parameters.length != argCount) {
+            RuntimeError(ln, "Wrong argument count for function: '%s' expected %d parameters, not %d", ef.name, ef.parameters.length, argCount);
+            return false;
+        }
         
+        Value[] stackVals;
+
+        for (int i = 0; i < argCount; i++) {
+            stackVals ~= Pop();
+        }
+
         callIndex = callIndex + 1;
         frames[callIndex] = CallFrame(ef);
         this.currentCallFrame.ip = chunk.bytes.ptr;
         ResetStack();
+        
+        for (int d = 0; d < argCount; d++) {
+            Value v = stackVals[d];
+            if (v.type == ValueType.Integer && ef.parameters[d].paramType == ValueType.FloatingPoint) {
+                Value ab = NewFloat(AsInt(v));
+                v = ab;
+            } else if (v.type != ef.parameters[d].paramType ||
+                (v.type == ValueType.Object &&
+                 ef.parameters[d].paramType == ValueType.Object &&
+                 allocatedObjects[AsObject(v)].type != ef.parameters[d].objectType)){
+                write("Error in line ",ln," > Expected parameter ", d, " to be of type '");
+                write(ef.parameters[d].paramType);
+                write("' not '");
+                PrintType(v);
+                writeln("'");
+                return false;
+            }
+            currentCallFrame.allocLets[currentCallFrame.letPointer++] = v;
+        }
+        
         auto exitCode = Run();
         if (exitCode != VMExitCode.Okay) {
             writeln("AngelVM Failed to execute function '", ef.name ,"' properly.");
@@ -137,8 +174,73 @@ public class AngelVM {
                         break;
                     }
                 }
+                case OpSet.FindAndGetLet: {
+                    AngelString obj = cast(AngelString) ReadObject();
+                    string targetVar = obj.characters;
+
+                    bool found = false;
+                    foreach (string k ; modules.byKey()) {
+                        AngelModule m = modules[k];
+                        foreach (string nm ; m.globals.byKey()) {
+                            if (nm == targetVar) {
+                                Push(m.globals[nm].value);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found)
+                            break;
+                    }
+                    if (!found) {
+                        RuntimeError(GetCurrentLine(), "the variable: %s wasn't found on the current context, are you missing a mod?", targetVar);
+                    }
+                    break;
+                }
+                case OpSet.FindAndSetLet: {
+                    AngelString obj = cast(AngelString) ReadObject();
+                    string targetVar = obj.characters;
+
+                    bool found = false;
+                    foreach (string k ; modules.byKey()) {
+                        AngelModule m = modules[k];
+                        foreach (string nm ; m.globals.byKey()) {
+                            if (nm == targetVar) {
+                                GlobalValue targetVariable = m.globals[targetVar];
+                                Value v = Pop();
+
+                                if (targetVariable.type == ValueType.Object && v.type == ValueType.Object) {
+                                    if (!v.isNull)
+                                        targetVariable.value.isNull = false;
+                                } 
+
+                                if (targetVariable.type == v.type) {
+                                    targetVariable.value.data = v.data;
+                                } else if (targetVariable.type == ValueType.FloatingPoint && v.type == ValueType.Integer) {
+                                    targetVariable.value.data = NewFloat(AsInt(v)).data;
+                                } else {
+                                    write("Error in line ",GetCurrentLine()," > Cannot assign a '");
+                                    PrintType(v);
+                                    write("' to a '");
+                                    PrintType(targetVariable.value
+                                    );
+                                    writeln("'");
+                                    return VMExitCode.RuntimeError;
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found)
+                            break;
+                    }
+                    if (!found) {
+                        RuntimeError(GetCurrentLine(), "the variable: %s wasn't found on the current context, are you missing a mod?", targetVar);
+                    }
+                    break;
+                }
                 case OpSet.FindMethodAndInvoke: {
                     AngelString obj = cast(AngelString) ReadObject();
+                    int argCount = AsInt(ReadConstant());
                     string targetFunc = obj.characters;
 
                     bool foundFunction = false;
@@ -146,7 +248,7 @@ public class AngelVM {
                         AngelModule m = modules[k];
                         foreach (string nm ; m.functions.byKey()) {
                             if (nm == targetFunc) {
-                                if(!Invoke(k, targetFunc)) {
+                                if(!Invoke(k, targetFunc, argCount)) {
                                     return VMExitCode.RuntimeError;
                                 }
                                 foundFunction = true;
@@ -230,7 +332,14 @@ public class AngelVM {
                     break;
                 }
                 case OpSet.GetLet: {
-                    Push(currentCallFrame.allocLets[AsInt(ReadConstant())]);
+                    int i = AsInt(ReadConstant());
+
+                    if (i >= currentCallFrame.allocLets.length) {
+                        RuntimeError(GetCurrentLine(), "Tried to access a variable that doesn't exists.");
+                        return VMExitCode.RuntimeError;
+                    }
+
+                    Push(currentCallFrame.allocLets[i]);
                     break;
                 }
                 case OpSet.Add: {

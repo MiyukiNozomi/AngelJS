@@ -38,38 +38,77 @@ public class Local {
 
 public class ModuleCompiler {
 
-    public AngelModule currentModule;
+    public AngelModule[] modules;
+    public int currModuleCompIndex = 0;
 
-    public this(string moduleName) {
-        currentModule = new AngelModule(moduleName);
+    public AngelModule currentModule() {return modules[currModuleCompIndex];}
+
+    public SyntaxTree[] syntaxTrees;
+
+    public void AddTree(SyntaxTree t) {
+        syntaxTrees ~= t;
     }
 
-    public AngelModule CompileModule(string filename) {
-        import std.file : readText;
-        Parser p = new Parser(readText(filename));
-        if (p.hadErrors) {
-            writeln("Module Compilation failed: parser errors were detected.");
-            return currentModule;
+    public bool ModuleExists(Token name, out SyntaxTree target) {
+        for (int d = 0; d < syntaxTrees.length; d++) {
+            if (syntaxTrees[d].filename == name.text) {
+                target = syntaxTrees[d];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void MapImports(int index) {
+        SyntaxTree t = syntaxTrees[index];
+
+        for (int g = 0; g < t.imports.length; g++) {
+            ImportNode im = cast(ImportNode) t.imports[g];
+            SyntaxTree importedTree;
+            if (ModuleExists(im.mod, importedTree)) {
+                FunctionMap map = FunctionMap(im.mod.text);
+                
+                for (int c = 0; c < importedTree.functions.length; c++) {
+                    map.functions ~= importedTree.functions[c].name.text;
+                }
+            } else {
+                CompileError(t.filename, im.mod.line, "The module '%s' doesn't exists. are you missing a reference?", im.mod.text);
+            }
+        }
+    }
+
+    public void CompileAll() {
+        for (int i = 0; i < syntaxTrees.length; i++) {
+            modules ~= CompileModule(i);
+        }
+    }
+
+    public AngelModule CompileModule(int index) {
+        SyntaxTree things = syntaxTrees[index];
+        MapImports(index);
+        for (int i = 0; i < things.variables.length; i++) {
+            Compiler cd = new Compiler(things.filename, things.variables[i], this);
+            GlobalValue gv = cd.CompileField();
+            currentModule.globals[gv.name] = gv;
         }
 
-        SyntaxTree things = p.Parse();
-
-        debug {
-            things.Print();
-        }
-        for (int i = 0; i < things.tree.length; i++) {
-            Node t = things.tree[i];
-            Compiler cc = new Compiler(filename, t);
-            AngelFunction e = cc.Compile();
+        for (int d = 0; d < things.functions.length; d++) {
+            Compiler cc = new Compiler(things.filename, things.functions[d], this);
+            AngelFunction e = cc.CompileFunction();
             currentModule.functions[e.name] = e;
         }
 
         return currentModule;
     }
 
+    void CompileError(Char, Args...)(string file, int line, in Char[] fmt, Args args) {
+        writeln("Error in file '",file, "' at line ", line, " > ", format(fmt, args));
+    }
 }
 
 public class Compiler {
+
+    public ModuleCompiler moduleCompiler;
 
     private ByteChunk finalBytecode;
     private Node tree;
@@ -88,12 +127,39 @@ public class Compiler {
     public string file;
     public bool wroteReturn = false;
 
-    public this(string file, Node tree) {
+    public this(string file, Node tree, ModuleCompiler cc) {
         this.file = file;
         this.tree = tree;
+        this.moduleCompiler = cc;
     }
 
-    public AngelFunction Compile() {
+    public GlobalValue CompileField() {
+        LetNode nd = cast(LetNode) this.tree;
+
+        GlobalValue e = new GlobalValue();
+        e.name = nd.name.text;
+
+        ObjectType tt;
+        if (IsObject(nd.type, tt)) {
+            e.type = ValueType.Object;
+        } else {
+            e.type = TypeToVType(nd.type);
+        }
+        e.objectType = tt;
+
+        e.value.type = e.type;
+
+        if (nd.assign !is null) {
+            StartScope();
+            TranslateNode(nd.assign);
+            EndScope(nd.name.line);
+        }
+//        e.assignOperation = finalBytecode;
+        
+        return e;
+    }
+
+    public AngelFunction CompileFunction() {
         FunctionNode fn = cast(FunctionNode) this.tree;
 
         currentFunction = new AngelFunction();
@@ -233,8 +299,14 @@ public class Compiler {
             case NodeType.FunctionCall: {
                 FunctionCallNode nd = cast(FunctionCallNode) t;
 
+                for (ulong i = 0; i < nd.parameters.length; i++) {
+                    TranslateNode(nd.parameters[i], false);
+                }
+
                 finalBytecode.Write(OpSet.FindMethodAndInvoke, nd.funcName.line);
                 finalBytecode.Write(finalBytecode.WriteObject(new AngelString(nd.funcName.text)), nd.funcName.line);
+                finalBytecode.Write(finalBytecode.WriteConstant(NewInt(cast(int) nd.parameters.length)), nd.funcName.line);
+
                 break;
             }
             case NodeType.Return: {
@@ -357,7 +429,12 @@ public class Compiler {
             case NodeType.LetAssign: {
                 LetAssignNode nd = cast(LetAssignNode) t;
 
-                if ((nd.varName.text in locals) is null) {
+                if ((nd.varName.text in moduleCompiler.currentModule.globals) !is null) {
+                    TranslateNode(nd.expr);
+                    finalBytecode.Write(OpSet.FindAndSetLet, nd.varName.line);
+                    finalBytecode.Write(finalBytecode.WriteObject(new AngelString(nd.varName.text)), nd.varName.line);
+                    break;
+                } else if ((nd.varName.text in locals) is null) {
                     CompileError(nd.varName.line, "Unrecognized variable '%s'", nd.varName.text);
                     return;
                 }
@@ -397,8 +474,13 @@ public class Compiler {
             }
             case NodeType.Access: {
                 Token thingName = (cast(AccessNode) t).thing;
-                if ((thingName.text in locals) is null) {
-                    CompileError(thingName.line, "Unknown variable/function '%s'", thingName.text);
+
+                if ((thingName.text in moduleCompiler.currentModule.globals) !is null) {
+                    finalBytecode.Write(OpSet.FindAndGetLet, thingName.line);
+                    finalBytecode.Write(finalBytecode.WriteObject(new AngelString(thingName.text)), thingName.line);
+                    break;
+                } else if ((thingName.text in locals) is null) {
+                    CompileError(thingName.line, "Unknown variable '%s'", thingName.text);
                     return;
                 }
 

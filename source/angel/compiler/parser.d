@@ -11,21 +11,28 @@ public class Parser {
     public Token current;
     public Lexer lexer;
     public bool hadErrors;
+    public string filename;
 
-    public this(string source) {
+    public this(string name, string source) {
         this.lexer = new Lexer(source);
+        this.filename = name;
         this.Next();
     }
 
     public SyntaxTree Parse() {
         SyntaxTree t = new SyntaxTree();
+        t.filename = filename;
 
         while (current.type != TokenType.EndOfFile) {
             Node nd = ParseGlobalsScope();
             
             if (nd is null) continue;
             
-            t.tree ~= nd;
+            if (nd.type == NodeType.Function) {
+                t.functions ~= cast(FunctionNode) nd;
+            } else {
+                t.variables ~= cast(LetNode) nd;
+            }
         }
 
         t.eof = current;
@@ -36,6 +43,9 @@ public class Parser {
     public Node ParseGlobalsScope() {
         if (current.type == TokenType.Keyword_LevelModifier) {
             return ParseMethod();
+        } else if (current.type == TokenType.Keyword_Import) {
+            Next();
+            return new ImportNode(Match([TokenType.String], "Expected a string that represents a module name."));
         } else {
             return ParseLet();
         }
@@ -224,7 +234,7 @@ public class Parser {
             }
             Next();
         } else {
-            writeln("Error at line ", current.line,": Expected ';' not  ", current.type);
+            writeln("Error in file \"" ~ this.filename ~ "\" at line ", current.line,": Expected ';' not  ", current.type);
             hadErrors = true;
             return null;
         }
@@ -324,7 +334,7 @@ public class Parser {
             return Next();
         } else {
             // same reason as in Match()
-            writeln("Error at line ", current.line,": Expected '",t,"' not  ", current.type);
+            writeln("Error in file \"" ~ this.filename ~ "\" at line ", current.line,": Expected '",t,"' not  ", current.type);
             hadErrors = true;
             Token tk = Token(current.line, current.position, "badtoken", t);
             Next();
@@ -349,9 +359,9 @@ public class Parser {
         // i'm not using Error() here because i have no idea how to print out an element of an enum
         // as something like "Semicolon" or "Identifier"
         if (msg == "")
-            writeln("Error at line ", current.line,": Expected '",types[0],"' not  ", current.type);
+            writeln("Error in file \"" ~ this.filename ~ "\" at line ", current.line,": Expected '",types[0],"' not  ", current.type);
         else
-            writeln("Error at line ", current.line,": ", msg);
+            writeln("Error in file \"" ~ this.filename ~ "\" at line ", current.line,": ", msg);
         
         hadErrors = true;
         Next();
@@ -359,7 +369,7 @@ public class Parser {
     }
 
     public void Error(Char, Args...)(in Char[] fmt, Args args) {
-        writeln("Error at line ", current.line,": ", format(fmt, args));
+        writeln("Error in file \"" ~ this.filename ~ "\" at line ", current.line,": ", format(fmt, args));
         hadErrors = true;
     }
 }

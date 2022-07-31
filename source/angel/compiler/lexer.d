@@ -23,6 +23,7 @@ public enum TokenType {
     Keyword_Else,
     Keyword_While,
     Keyword_For,
+    Keyword_Import,
 
     String,
     Float, Integer,
@@ -159,6 +160,7 @@ auto GetTypeForStr(string acc) {
         if (acc == "assert") return TokenType.Keyword_Assert;
         if (acc == "print") return TokenType.Keyword_Print;
     }
+    if (acc == "import") return TokenType.Keyword_Import;
     if (acc == "public" || acc == "private") return TokenType.Keyword_LevelModifier;
     if (acc == "return") return TokenType.Keyword_Return;
     if (acc == "let" || acc == "var") return TokenType.Keyword_Let;

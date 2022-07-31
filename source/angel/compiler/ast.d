@@ -7,6 +7,7 @@ import angel.compiler.lexer;
 public enum NodeType {
     Literal, BinaryOP, Unary, Let, Access, LetAssign,
     If, While, For, Block , Function, FunctionCall,
+    Import,
     Return,
 
     /** only avaliable in debug mode, check lexer.d in line 8 - 14*/
@@ -21,13 +22,31 @@ public abstract class Node {
     }
 }
 
+public struct FunctionMap {
+    string moduleSource;
+    string[] functions;
+}
+
 public class SyntaxTree {
-    public Node[] tree;
+    public FunctionNode[] functions;
+    public LetNode[] variables;
+
+    public ImportNode[] imports;
+    public FunctionMap[] importedModulesMap;
+    
     public Token eof;
 
+    public string filename;
+
     public void Print() {
-        for (int i = 0; i < tree.length; i++) {
-            tree[i].PrintNode("");
+        writeln("tree globals: ");
+        for (int d = 0; d < variables.length; d++) {
+            variables[d].PrintNode("");
+        }
+
+        writeln("Tree functions: ");
+        for (int i = 0; i < functions.length; i++) {
+            functions[i].PrintNode("");
         }
     }
 }
@@ -102,6 +121,22 @@ public class FunctionCallNode : Node {
             for (int i = 0; i < parameters.length; i++) {
                 parameters[i].PrintNode(indent ~"      ");
             }
+        }
+    }
+}
+
+public class ImportNode : Node {
+
+    public Token mod;
+
+    public this(Token mod) {
+        super(NodeType.Import);
+        this.mod = mod;
+    }
+
+    debug {
+        public override void PrintNode(string indent) {
+            writeln(indent, "Import '", mod.text, "'");
         }
     }
 }
@@ -278,7 +313,8 @@ public class LetNode : Node {
     debug {
         public override void PrintNode(string indent) {
             writeln(indent,"Let '", name.text, "' : ", type.text);
-            assign.PrintNode(indent ~"   ");
+            if (assign !is null)
+                assign.PrintNode(indent ~"   ");
         }
     }
 }

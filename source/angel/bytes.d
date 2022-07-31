@@ -135,6 +135,10 @@ enum OpSet {
     SetLet,
 
     FindMethodAndInvoke,
+    FindAndGetLet,
+    FindAndSetLet,
+
+    ModuleInvoke,
 
     Jump,
     Loop,
@@ -241,7 +245,14 @@ debug {
 
         uint8_t inst = bc.bytes[offset];
         switch(inst) {
-            case OpSet.FindMethodAndInvoke: return ObjectInstruction("find&Invoke", offset, bc);
+            case OpSet.FindMethodAndInvoke: {
+                AngelObject o = bc.objects[bc.bytes[offset + 1]];
+                int argCount = AsInt(bc.constants[bc.bytes[offset + 2]]);
+                writef("%-12s \'%s\' ArgCount: %d\n", "find&Invoke", o.ToString(), argCount);
+                return offset + 3;
+            }   
+            case OpSet.FindAndSetLet: return ObjectInstruction("find&Set", offset, bc);
+            case OpSet.FindAndGetLet: return ObjectInstruction("find&Get", offset, bc);
             case OpSet.AllocObject:         return ObjectInstruction("allocObject", offset, bc);
             case OpSet.DeleteObject:        return ConstantInstruction("deleteObject", offset, bc);
 

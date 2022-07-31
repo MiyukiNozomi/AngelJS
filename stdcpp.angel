@@ -1,0 +1,3 @@
+public std_cout(string msg) : void {
+    print(msg);
+}

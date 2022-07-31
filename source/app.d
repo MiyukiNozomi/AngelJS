@@ -13,11 +13,14 @@ void main()
 {	
 	ModuleCompiler cc = new ModuleCompiler("test");
 	AngelModule am = cc.CompileModule("test.angel");
+	ModuleCompiler stdcc = new ModuleCompiler("stdcpp");
+	AngelModule stdam = stdcc.CompileModule("stdcpp.angel");
 
 	AngelVM avm = new AngelVM();
 	avm.AddModule(am.moduleName, am);
+	avm.AddModule(stdam.moduleName, stdam);
 	
-	avm.Invoke("test","main");
+	avm.Invoke("test","main", 0);
 /*
 	foreach (string s ; am.functions.byKey()) {
 		AngelFunction f = am.functions[s];

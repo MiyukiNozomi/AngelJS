@@ -58,12 +58,22 @@ public class AngelFunction : AngelObject {
     }
 }
 
+public class GlobalValue {
+    public string name;
+    public Value value;
+
+    public ValueType type;
+    public ObjectType objectType;
+}
 
 public class AngelModule {
     
     public string moduleName;
-    public Value[string] globals;
+    public GlobalValue[string] globals;
     public AngelFunction[string] functions;
+
+    public bool constructed = false;
+    public AngelFunction constructor;
 
     public this(string moduleName) {
         this.moduleName = moduleName;

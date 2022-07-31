@@ -1,8 +1,9 @@
-public sayHi() : float {
-	return 2 + 3;
-}
+import "stdcpp"
 
 public main() : void {
-	let a : float = sayHi();
-	print(a);
+	std_cout("Hi");
 }
+
+# TODOs: 
+# [ ] add the hability to import modules
+# [X] make globals functional
